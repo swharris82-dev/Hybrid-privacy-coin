@@ -252,6 +252,21 @@ fn hybrid_testnet_config_parses() {
         panic!("hybrid network must be a configured Testnet");
     };
     assert_eq!(params.network_name(), "HybridTestnet");
+
+    // The configured genesis hash matches the shipped genesis block.
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let genesis_block: zebra_chain::block::Block =
+        hex::decode(include_str!("../../../../hybrid/genesis-block.hex").trim())
+            .expect("genesis block file is hex")
+            .zcash_deserialize_into()
+            .expect("genesis block file is a valid block");
+    assert_eq!(params.genesis_hash(), genesis_block.hash());
+    assert_eq!(genesis_block.coinbase_height(), Some(Height(0)));
+    assert_eq!(
+        config.network.checkpoint_list().hash(Height(0)),
+        Some(genesis_block.hash())
+    );
     assert!(config.network.is_shielded_only(Height(1)));
     assert!(!config.network.is_shielded_only(Height(0)));
     assert!(params.funding_streams().is_empty());

@@ -26,6 +26,13 @@ network_name = "HybridTestnet"
 network_magic = [0x48, 0x59, 0x42, 0x31]
 slow_start_interval = 0
 
+# Our own genesis block, minted with:
+#   cargo run -p zebra-chain --example hybrid-genesis -- \
+#     --message "HybridTestnet genesis 2026-10-14: private by default" \
+#     --time 1791936000 --out hybrid/genesis-block.hex
+# Load hybrid/genesis-block.hex into the first node with the submitblock RPC.
+genesis_hash = "b82107d003c12b71f5c3c12503a087d91516feb0844b99bbf2ae94380a9f86c3"
+
 # Proof of work is disabled while the RandomX swap is in progress.
 # Set to false once RandomX verification lands (see hybrid/HYBRID.md).
 disable_pow = true

@@ -13,7 +13,7 @@ Design spec: the "Hybrid Privacy Coin: Design Spec" doc.
 | Shielded-only consensus rule | Done, tested |
 | Node config for a shielded-only network | Done, tested |
 | Startup guard against transparent coinbase payments | Done, tested |
-| Own genesis block | Not started |
+| Own genesis block | Done, minted and tested |
 | RandomX proof of work | Not started |
 | Dandelion++ transaction relay | Not started |
 | Emission curve, fee burn, tail emission | Not started (reuse NU7, see below) |
@@ -43,6 +43,23 @@ of producing blocks nobody can mine.
 
 **Config.** `hybrid/hybrid-testnet.toml` defines a private network with the rule
 active from block 1.
+
+**Genesis block.** `custom_genesis_block` in `zebra-chain/src/block/genesis.rs` builds the
+first block of a custom network, and the `hybrid-genesis` example wraps it as a command.
+The block keeps Zcash's genesis coinbase input, which Zebra recognizes as height 0, and puts
+our chain's message in a zero-value `OP_RETURN` output that can never be spent.
+
+| Genesis field | Value |
+| --- | --- |
+| Hash | `b82107d003c12b71f5c3c12503a087d91516feb0844b99bbf2ae94380a9f86c3` |
+| Time | 1791936000 (2026-10-14 00:00 UTC) |
+| Difficulty bits | `200f0f0f` (the network's limit) |
+| Message | `HybridTestnet genesis 2026-10-14: private by default` |
+| File | `hybrid/genesis-block.hex` |
+
+The nonce and Equihash solution are all zeros, so this genesis block only works while
+`disable_pow = true`. Re-mint it when the proof of work is final; every node and the config
+must then switch to the new hash.
 
 Files touched:
 
@@ -77,16 +94,28 @@ cargo nextest run -p zebra-chain -p zebra-network -p zebra-consensus --lib -E 't
 cargo build --release --bin zebrad
 # Edit miner_address in hybrid/hybrid-testnet.toml to a unified address with an Orchard receiver.
 ./target/release/zebrad -c hybrid/hybrid-testnet.toml start
+
+# First node only: load the genesis block. Other nodes download it from peers.
+curl -s -H 'Content-Type: application/json' http://127.0.0.1:18232 \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"submitblock\",\"params\":[\"$(cat hybrid/genesis-block.hex)\"]}"
 ```
 
-Proof of work is disabled in this config until RandomX lands. The network still uses
-the public Testnet genesis block; see the next steps.
+To mint a different genesis block (new message, time, or difficulty):
+
+```bash
+cargo run -p zebra-chain --example hybrid-genesis -- \
+  --message "your message, 75 bytes max" --time <unix seconds in the past> \
+  --out hybrid/genesis-block.hex
+```
+
+Then copy the printed hash into `genesis_hash` and wipe each node's state directory.
+
+Proof of work is disabled in this config until RandomX lands.
 
 ## Next steps, in order
 
-1. **Genesis block.** Zebra cannot generate one. Build a small tool (or use zcashd's
-   `CreateGenesisBlock()` logic) to mint a genesis block with our own timestamp and
-   message, set `genesis_hash` in the config, and submit it with the `submitblock` RPC.
+1. **First shielded block.** Mine block 1 with a coinbase paid to an Orchard/Ironwood
+   address, confirming the shielded-only rule and the block template code agree.
 2. **NU7 economics.** Zcash NU7 already implements a fee burn (ZIP 235) and reissuance
    of burned value (ZIP 234/237). Test activating `"NU7" = 1` and tune
    `initial_nsm_value_balance` and halving intervals. This gives the capped emission plus
