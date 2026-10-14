@@ -257,6 +257,53 @@ pub fn coinbase_orchard_component_empty(
     Ok(())
 }
 
+/// Checks that a transaction is fully shielded, on networks that enable the shielded-only rules.
+///
+/// # Consensus
+///
+/// > [Shielded-only networks, from `shielded_only_height` onward] A transaction MUST NOT have
+/// > any transparent inputs that spend a previous output, and MUST NOT have any transparent
+/// > outputs.
+///
+/// > [Shielded-only networks, from `shielded_only_height` onward] A transaction MUST NOT have
+/// > any JoinSplit descriptions, Sapling Spend descriptions, or Sapling Output descriptions.
+///
+/// The single coinbase input of a coinbase transaction is not a transparent spend, so it is
+/// still allowed. Coinbase rewards must therefore be paid to Orchard or Ironwood outputs, which
+/// also means configured funding streams must not pay transparent addresses on these networks.
+///
+/// Together these rules leave only the Orchard and Ironwood pools, so every transaction hides
+/// its sender, receiver, and amount inside a Halo 2 proof.
+///
+/// (No-op on networks without the shielded-only rules, and below their activation height.)
+pub fn shielded_only(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    if !network.is_shielded_only(height) {
+        return Ok(());
+    }
+
+    if tx.spent_outpoints().next().is_some() {
+        return Err(TransactionError::ShieldedOnlyTransparentInput);
+    }
+
+    if tx.has_transparent_outputs() {
+        return Err(TransactionError::ShieldedOnlyTransparentOutput);
+    }
+
+    if tx.has_sprout_joinsplit_data() {
+        return Err(TransactionError::ShieldedOnlySprout);
+    }
+
+    if tx.has_sapling_shielded_data() {
+        return Err(TransactionError::ShieldedOnlySapling);
+    }
+
+    Ok(())
+}
+
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
 /// # Consensus

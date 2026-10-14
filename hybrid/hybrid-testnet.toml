@@ -1,0 +1,47 @@
+# Hybrid privacy coin: private test network config for zebrad.
+#
+# Run with:  zebrad -c hybrid/hybrid-testnet.toml start
+#
+# Every transaction on this network must be fully shielded from block 1:
+# no transparent spends or outputs, no Sprout, no Sapling. From NU6.3,
+# new value lives in the Ironwood pool, so Ironwood is the only pool that
+# can receive funds. Viewing keys work as they do in Zcash.
+
+[mining]
+# Coinbase rewards must go to a shielded receiver. Use a unified address
+# that contains an Orchard receiver (Zebra routes it to Ironwood at NU6.3).
+# A transparent-only address will produce blocks the network rejects.
+miner_address = "REPLACE_WITH_YOUR_UNIFIED_TESTNET_ADDRESS"
+# miner_memo = "hybrid testnet"
+
+[network]
+network = "Testnet"
+
+# Add your own nodes here. Never list the public Zcash Testnet seeders.
+initial_testnet_peers = []
+
+[network.testnet_parameters]
+network_name = "HybridTestnet"
+# Must differ from the public Zcash networks. Change before inviting peers.
+network_magic = [0x48, 0x59, 0x42, 0x31]
+slow_start_interval = 0
+
+# Proof of work is disabled while the RandomX swap is in progress.
+# Set to false once RandomX verification lands (see hybrid/HYBRID.md).
+disable_pow = true
+target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+
+# Shielded-only rules from the first block after genesis.
+shielded_only_height = 1
+
+# Funding streams and the NU6.1 lockbox disbursements pay transparent
+# addresses, which shielded-only networks reject at startup.
+funding_streams = []
+lockbox_disbursements = []
+
+# Activating NU6.3 at height 1 also activates every earlier upgrade at 1.
+[network.testnet_parameters.activation_heights]
+"NU6.3" = 1
+
+[rpc]
+listen_addr = "127.0.0.1:18232"

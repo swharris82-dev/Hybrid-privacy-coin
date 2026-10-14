@@ -300,6 +300,18 @@ pub enum TransactionError {
     #[error("Ironwood proof has a non-canonical size")]
     IronwoodProofSize,
 
+    #[error("transaction spends a transparent output on a shielded-only network")]
+    ShieldedOnlyTransparentInput,
+
+    #[error("transaction creates a transparent output on a shielded-only network")]
+    ShieldedOnlyTransparentOutput,
+
+    #[error("transaction has Sprout JoinSplits on a shielded-only network")]
+    ShieldedOnlySprout,
+
+    #[error("transaction has Sapling spends or outputs on a shielded-only network")]
+    ShieldedOnlySapling,
+
     #[error("unexpected error")]
     Other(String),
 }
@@ -432,6 +444,10 @@ impl TransactionError {
             | Halo2VerificationFailed
             | OrchardProofSize
             | IronwoodProofSize
+            | ShieldedOnlyTransparentInput
+            | ShieldedOnlyTransparentOutput
+            | ShieldedOnlySprout
+            | ShieldedOnlySapling
             | BothVPubsNonZero
             | DisabledAddToSproutPool
             | NegativeOrchardValueBalance

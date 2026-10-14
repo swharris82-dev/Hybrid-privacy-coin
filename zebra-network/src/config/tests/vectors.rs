@@ -201,6 +201,62 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
     );
 }
 
+/// Checks that a configured Testnet's shielded-only height survives a serialization round-trip.
+#[test]
+fn shielded_only_height_serialization_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let shielded_only_height = Height(1);
+
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_network_magic(Magic([0; 4]))
+            .unwrap()
+            .with_funding_streams(vec![])
+            .with_lockbox_disbursements(vec![])
+            .with_shielded_only_height(shielded_only_height)
+            .to_network()
+            .expect("failed to build configured network"),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(serialized.contains("shielded_only_height = 1"));
+
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+    assert_eq!(config, deserialized);
+
+    let Network::Testnet(params) = &deserialized.network else {
+        panic!("deserialized network must be a Testnet");
+    };
+    assert_eq!(params.shielded_only_height(), Some(shielded_only_height));
+}
+
+/// The shipped hybrid network config deserializes into a shielded-only network.
+#[test]
+fn hybrid_testnet_config_parses() {
+    let _init_guard = zebra_test::init();
+
+    let file: toml::Table = toml::from_str(include_str!("../../../../hybrid/hybrid-testnet.toml"))
+        .expect("hybrid config is valid TOML");
+    let network_section = file
+        .get("network")
+        .expect("hybrid config has a [network] section")
+        .clone();
+    let config: Config = network_section
+        .try_into()
+        .expect("hybrid [network] section is a valid zebra-network config");
+
+    let Network::Testnet(params) = &config.network else {
+        panic!("hybrid network must be a configured Testnet");
+    };
+    assert_eq!(params.network_name(), "HybridTestnet");
+    assert!(config.network.is_shielded_only(Height(1)));
+    assert!(!config.network.is_shielded_only(Height(0)));
+    assert!(params.funding_streams().is_empty());
+}
+
 /// Coalesced upgrades must not acquire earlier Regtest defaults after serialization.
 #[test]
 fn coincident_regtest_upgrades_preserve_activation_on_roundtrip() {

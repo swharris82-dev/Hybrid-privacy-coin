@@ -792,3 +792,74 @@ fn public_testnet_peers_require_matching_orchard_disable_height() {
         .disable_temporary_orchard_disabling_soft_fork()
         .is_compatible_with_default_parameters());
 }
+
+/// Checks the shielded-only height accessors and the builder rule that shielded-only networks
+/// must not pay coinbase value to transparent addresses.
+#[test]
+fn shielded_only_heights_and_coinbase_payment_rules() {
+    let _init_guard = zebra_test::init();
+
+    let height = Height(100);
+
+    // Default networks never enable the shielded-only rules.
+    assert_eq!(Network::Mainnet.shielded_only_height(), None);
+    assert_eq!(Network::new_default_testnet().shielded_only_height(), None);
+    assert_eq!(
+        Network::new_regtest(Default::default()).shielded_only_height(),
+        None,
+    );
+
+    // The default Testnet funding streams pay transparent addresses, so a shielded-only network
+    // that keeps them is rejected.
+    assert_eq!(
+        testnet::Parameters::build()
+            .with_shielded_only_height(height)
+            .to_network()
+            .unwrap_err(),
+        ParametersBuilderError::ShieldedOnlyTransparentCoinbaseOutputs,
+    );
+
+    // Clearing funding streams still leaves the NU6.1 lockbox disbursements, which also pay
+    // transparent addresses.
+    assert_eq!(
+        testnet::Parameters::build()
+            .with_funding_streams(vec![])
+            .with_shielded_only_height(height)
+            .to_network()
+            .unwrap_err(),
+        ParametersBuilderError::ShieldedOnlyTransparentCoinbaseOutputs,
+    );
+
+    // With both cleared, the network builds and activates at the configured height.
+    let network = testnet::Parameters::build()
+        .with_funding_streams(vec![])
+        .with_lockbox_disbursements(vec![])
+        .with_shielded_only_height(height)
+        .to_network()
+        .expect("shielded-only network without transparent coinbase payments is valid");
+
+    assert_eq!(network.shielded_only_height(), Some(height));
+    assert!(!network.is_shielded_only(Height(99)));
+    assert!(network.is_shielded_only(height));
+
+    // Disabling the rules removes the height again.
+    let disabled = testnet::Parameters::build()
+        .with_shielded_only_height(height)
+        .disable_shielded_only()
+        .to_network()
+        .expect("network without shielded-only rules is valid");
+    assert_eq!(disabled.shielded_only_height(), None);
+
+    // A shielded-only network is never compatible with the public Testnet.
+    assert!(!testnet::Parameters::build()
+        .with_shielded_only_height(height)
+        .is_compatible_with_default_parameters());
+
+    // Regtest has no funding streams or lockbox disbursements by default, so it can enable the
+    // rules directly.
+    let regtest = Network::new_regtest(RegtestParameters {
+        shielded_only_height: Some(Height(1)),
+        ..Default::default()
+    });
+    assert!(regtest.is_shielded_only(Height(1)));
+}

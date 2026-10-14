@@ -402,6 +402,33 @@ impl Network {
         self.temporary_orchard_disabling_soft_fork_height() == Some(height)
     }
 
+    /// Returns the height from which only fully shielded transactions are valid, if this
+    /// network enables the shielded-only rules.
+    ///
+    /// Mainnet and the default public Testnet never enable these rules. They exist for
+    /// custom networks that launch as shielded-only chains.
+    pub fn shielded_only_height(&self) -> Option<Height> {
+        match self {
+            Network::Mainnet => None,
+            Network::Testnet(parameters) => parameters.shielded_only_height(),
+        }
+    }
+
+    /// Returns whether the shielded-only rules apply at `height`.
+    ///
+    /// When active, transactions must not:
+    /// - spend or create transparent outputs (other than the single coinbase input of a
+    ///   coinbase transaction),
+    /// - contain Sprout JoinSplits, or
+    /// - contain Sapling spends or outputs.
+    ///
+    /// All value must be held and moved in the Orchard or Ironwood shielded pools, so every
+    /// transaction hides its sender, receiver, and amount. Holders can still disclose their
+    /// own history with viewing keys.
+    pub fn is_shielded_only(&self, height: Height) -> bool {
+        self.shielded_only_height().is_some_and(|h| height >= h)
+    }
+
     /// Returns whether the consensus rule requiring a canonically-sized Orchard proof
     /// is active at `height`.
     ///

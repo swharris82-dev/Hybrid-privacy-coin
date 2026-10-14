@@ -564,6 +564,10 @@ pub struct ParametersBuilder {
     checkpoints: Arc<CheckpointList>,
     /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
     temporary_orchard_disabling_soft_fork_height: Option<Height>,
+    /// Height from which only fully shielded transactions are valid, if configured.
+    ///
+    /// See [`Network::is_shielded_only`] for the rules this activates.
+    shielded_only_height: Option<Height>,
 }
 
 impl Default for ParametersBuilder {
@@ -605,6 +609,7 @@ impl Default for ParametersBuilder {
             temporary_orchard_disabling_soft_fork_height: Some(
                 super::TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT,
             ),
+            shielded_only_height: None,
         };
         builder.update_funding_stream_end_height();
         builder
@@ -977,6 +982,20 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the height from which only fully shielded transactions are valid on this network.
+    ///
+    /// See [`Network::is_shielded_only`] for the rules this activates.
+    pub fn with_shielded_only_height(mut self, height: Height) -> Self {
+        self.shielded_only_height = Some(height);
+        self
+    }
+
+    /// Disables the shielded-only rules on this network.
+    pub fn disable_shielded_only(mut self) -> Self {
+        self.shielded_only_height = None;
+        self
+    }
+
     fn validate_halving_interval(&self, network: &Network) -> Result<(), ParametersBuilderError> {
         if height_for_halving(1, network).is_none()
             || (!self.funding_streams.is_empty()
@@ -1026,6 +1045,36 @@ impl ParametersBuilder {
         Ok(())
     }
 
+    /// Rejects shielded-only networks whose coinbase rules would require transparent outputs.
+    ///
+    /// Non-deferred funding stream recipients and lockbox disbursements are paid to transparent
+    /// addresses in the coinbase transaction, which the shielded-only rules forbid. Allowing them
+    /// would make every block that owes those payments impossible to mine.
+    fn check_shielded_only_coinbase_outputs(&self) -> Result<(), ParametersBuilderError> {
+        if self.shielded_only_height.is_none() {
+            return Ok(());
+        }
+
+        let has_transparent_funding_stream = self.funding_streams.iter().any(|streams| {
+            streams
+                .recipients()
+                .keys()
+                .any(|receiver| !receiver.is_deferred())
+        });
+
+        let nu6_1_scheduled = self
+            .activation_heights
+            .values()
+            .any(|&upgrade| upgrade == NetworkUpgrade::Nu6_1);
+        let has_lockbox_disbursements = nu6_1_scheduled && !self.lockbox_disbursements.is_empty();
+
+        if has_transparent_funding_stream || has_lockbox_disbursements {
+            return Err(ParametersBuilderError::ShieldedOnlyTransparentCoinbaseOutputs);
+        }
+
+        Ok(())
+    }
+
     /// Returns NU7's configured height without constructing or cloning a network.
     fn nu7_activation_height(&self) -> Option<Height> {
         self.activation_heights
@@ -1065,6 +1114,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints,
             temporary_orchard_disabling_soft_fork_height,
+            shielded_only_height,
         } = self;
         Parameters {
             network_name,
@@ -1085,6 +1135,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints,
             temporary_orchard_disabling_soft_fork_height,
+            shielded_only_height,
         }
     }
 
@@ -1103,6 +1154,7 @@ impl ParametersBuilder {
     /// P2SH or P2PKH addresses.
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
         self.check_nsm_reissuance_height()?;
+        self.check_shielded_only_coinbase_outputs()?;
         let mut network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
@@ -1145,6 +1197,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints: _,
             temporary_orchard_disabling_soft_fork_height,
+            shielded_only_height,
         } = Self::default();
 
         let nsm_parameters_match = self
@@ -1168,6 +1221,7 @@ impl ParametersBuilder {
             && self.lockbox_disbursements == lockbox_disbursements
             && self.temporary_orchard_disabling_soft_fork_height
                 == temporary_orchard_disabling_soft_fork_height
+            && self.shielded_only_height == shielded_only_height
     }
 }
 
@@ -1192,6 +1246,8 @@ pub struct RegtestParameters {
     /// The height from which the halving-preserving issuance ZIP reissues the NSM value balance.
     /// If unset, ZIP 237 derives the height; short custom schedules may have no crossing.
     pub nsm_reissuance_height: Option<Height>,
+    /// The height from which only fully shielded transactions are valid, if any.
+    pub shielded_only_height: Option<Height>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -1243,6 +1299,10 @@ pub struct Parameters {
     checkpoints: Arc<CheckpointList>,
     /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
     temporary_orchard_disabling_soft_fork_height: Option<Height>,
+    /// Height from which only fully shielded transactions are valid, if configured.
+    ///
+    /// See [`Network::is_shielded_only`] for the rules this activates.
+    shielded_only_height: Option<Height>,
 }
 
 /// Build directly from the uncached builder so initialization never re-enters this cache.
@@ -1283,6 +1343,7 @@ impl Parameters {
             should_allow_unshielded_coinbase_spends,
             initial_nsm_value_balance,
             nsm_reissuance_height,
+            shielded_only_height,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1316,7 +1377,12 @@ impl Parameters {
             parameters = parameters.with_nsm_reissuance_height(nsm_reissuance_height);
         }
 
+        if let Some(shielded_only_height) = shielded_only_height {
+            parameters = parameters.with_shielded_only_height(shielded_only_height);
+        }
+
         parameters.check_nsm_reissuance_height()?;
+        parameters.check_shielded_only_coinbase_outputs()?;
         check_funding_streams(&parameters.funding_streams)?;
 
         Self {
@@ -1362,6 +1428,8 @@ impl Parameters {
             lockbox_disbursements: _,
             checkpoints: _,
             temporary_orchard_disabling_soft_fork_height: _,
+            // Configurable on Regtest
+            shielded_only_height: _,
         } = Self::new_regtest(Default::default()).expect("default regtest parameters are valid");
 
         self.network_name == network_name
@@ -1539,6 +1607,11 @@ impl Parameters {
     /// transactions activates.
     pub fn temporary_orchard_disabling_soft_fork_height(&self) -> Option<Height> {
         self.temporary_orchard_disabling_soft_fork_height
+    }
+
+    /// Returns the height from which only fully shielded transactions are valid, if configured.
+    pub fn shielded_only_height(&self) -> Option<Height> {
+        self.shielded_only_height
     }
 }
 

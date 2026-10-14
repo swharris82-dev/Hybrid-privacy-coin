@@ -99,6 +99,11 @@ pub enum ParametersBuilderError {
         address: crate::transparent::Address,
     },
 
+    /// A shielded-only network is configured to pay coinbase value to transparent addresses.
+    #[error("shielded-only networks cannot pay funding streams or lockbox disbursements to transparent addresses; remove them or use only the deferred (lockbox) receiver")]
+    #[non_exhaustive]
+    ShieldedOnlyTransparentCoinbaseOutputs,
+
     #[error("checkpoints file format must be valid")]
     #[non_exhaustive]
     InvalidCheckpointsFormat,

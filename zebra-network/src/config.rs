@@ -636,6 +636,11 @@ struct DTestnetParameters {
     /// If unset, the default activation height for the network is used; the soft fork
     /// cannot be disabled via configuration.
     temporary_orchard_disabling_soft_fork_height: Option<u32>,
+    /// Height from which only fully shielded transactions are valid.
+    ///
+    /// If unset, the shielded-only rules are disabled. Configured funding streams must not pay
+    /// transparent addresses when this is set.
+    shielded_only_height: Option<u32>,
     /// Regtest only: whether to allow coinbase spends to have transparent outputs.
     should_allow_unshielded_coinbase_spends: Option<bool>,
 
@@ -740,6 +745,7 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             temporary_orchard_disabling_soft_fork_height: params
                 .temporary_orchard_disabling_soft_fork_height()
                 .map(|height| height.0),
+            shielded_only_height: params.shielded_only_height().map(|height| height.0),
             should_allow_unshielded_coinbase_spends: params
                 .is_regtest()
                 .then(|| params.should_allow_unshielded_coinbase_spends()),
@@ -934,6 +940,7 @@ where
         checkpoints,
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
+        shielded_only_height,
         should_allow_unshielded_coinbase_spends,
         initial_nsm_value_balance,
     } = params;
@@ -1041,6 +1048,11 @@ where
         );
     }
 
+    if let Some(height) = shielded_only_height {
+        params_builder =
+            params_builder.with_shielded_only_height(height.try_into().map_err(de::Error::custom)?);
+    }
+
     // Preserve the canonical public Testnet representation when no parameters changed.
     if network_name.is_none() && params_builder == testnet::Parameters::build() {
         return Ok(Network::new_default_testnet());
@@ -1089,6 +1101,7 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
         initial_nsm_value_balance,
+        shielded_only_height,
         ..
     } = params;
 
@@ -1105,6 +1118,10 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
         initial_nsm_value_balance,
+        shielded_only_height: shielded_only_height
+            .map(|height| height.try_into())
+            .transpose()
+            .map_err(|_| "shielded_only_height must be a valid block height")?,
     })
 }
 

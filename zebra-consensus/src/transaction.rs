@@ -838,6 +838,8 @@ fn check_structure_and_network_rules(
     // coinbase value is routed to the Ironwood pool instead).
     check::coinbase_orchard_component_empty(tx, network_upgrade)?;
     check::consensus_branch_id(tx, height, network)?;
+    // Shielded-only networks: no transparent spends or outputs, no Sprout, no Sapling.
+    check::shielded_only(tx, height, network)?;
 
     // Soft fork: temporarily require transactions to not contain Orchard actions.
     //

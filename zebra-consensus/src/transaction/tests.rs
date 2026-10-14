@@ -6423,3 +6423,131 @@ async fn non_coinbase_with_null_prevout_input_is_rejected() {
         .await;
     assert_eq!(rsp, Err(TransactionError::NonCoinbaseHasCoinbaseInput));
 }
+
+/// Builds a copy of the default Testnet with the shielded-only rules active from `height`.
+///
+/// Funding streams and lockbox disbursements pay transparent addresses, so they are cleared,
+/// as any real shielded-only network must do.
+fn shielded_only_testnet(height: Height) -> Network {
+    Parameters::build()
+        .with_funding_streams(vec![])
+        .with_lockbox_disbursements(vec![])
+        .with_shielded_only_height(height)
+        .to_network()
+        .expect("a shielded-only network without transparent coinbase payments is valid")
+}
+
+/// The shielded-only rules are inactive below their height, active at and above it, and never
+/// active on Mainnet or the default public Testnet.
+#[test]
+fn shielded_only_activation_boundary() {
+    let _init_guard = zebra_test::init();
+
+    let activation_height = Height(1_000);
+    let network = shielded_only_testnet(activation_height);
+
+    assert!(!network.is_shielded_only(Height(999)));
+    assert!(network.is_shielded_only(activation_height));
+    assert!(network.is_shielded_only(Height(1_001)));
+
+    assert_eq!(Network::Mainnet.shielded_only_height(), None);
+    assert_eq!(Network::new_default_testnet().shielded_only_height(), None);
+    assert!(!Network::Mainnet.is_shielded_only(Height::MAX));
+    assert!(!Network::new_default_testnet().is_shielded_only(Height::MAX));
+}
+
+/// Every historical transaction is classified correctly by the shielded-only check: anything
+/// with transparent spends, transparent outputs, Sprout, or Sapling is rejected, and transactions
+/// that only use Orchard (plus the coinbase input) are accepted.
+#[test]
+fn shielded_only_classifies_historical_transactions() {
+    let _init_guard = zebra_test::init();
+
+    let active = shielded_only_testnet(Height(1));
+    let height = Height(10);
+
+    let mut accepted = 0;
+    let mut rejected = 0;
+
+    for network in Network::iter() {
+        for (_height, transaction) in test_transactions(&network) {
+            let transaction = transaction.as_ref();
+
+            // The rules never apply on networks that do not enable them.
+            assert_eq!(check::shielded_only(transaction, height, &network), Ok(()));
+
+            let expected = if transaction.spent_outpoints().next().is_some() {
+                Err(TransactionError::ShieldedOnlyTransparentInput)
+            } else if transaction.has_transparent_outputs() {
+                Err(TransactionError::ShieldedOnlyTransparentOutput)
+            } else if transaction.has_sprout_joinsplit_data() {
+                Err(TransactionError::ShieldedOnlySprout)
+            } else if transaction.has_sapling_shielded_data() {
+                Err(TransactionError::ShieldedOnlySapling)
+            } else {
+                Ok(())
+            };
+
+            let result = check::shielded_only(transaction, height, &active);
+            assert_eq!(result, expected, "transaction {}", transaction.hash());
+
+            // Below the activation height, the rules are a no-op.
+            assert_eq!(
+                check::shielded_only(transaction, Height(0), &active),
+                Ok(())
+            );
+
+            if result.is_ok() {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+    }
+
+    assert!(
+        accepted > 0,
+        "test vectors must include fully shielded transactions"
+    );
+    assert!(
+        rejected > 0,
+        "test vectors must include transparent or legacy-pool transactions"
+    );
+}
+
+/// A coinbase transaction that pays a transparent output is rejected by block verification on a
+/// shielded-only network, showing the rule is wired into the shared consensus checks.
+#[tokio::test]
+async fn shielded_only_rejects_transparent_coinbase_in_blocks() {
+    let _init_guard = zebra_test::init();
+
+    let default_testnet = Network::new_default_testnet();
+    let tx = v5_transactions(default_testnet.block_iter())
+        .find(|transaction| transaction.is_coinbase() && transaction.has_transparent_outputs())
+        .expect("test vectors include a V5 coinbase with transparent outputs");
+
+    // A V5 coinbase's expiry height is its block height, where its consensus branch id is valid.
+    let height = tx
+        .expiry_height()
+        .expect("V5 coinbase has an expiry height");
+    let network = shielded_only_testnet(height);
+
+    let block_response = BlockTxVerifier::new(
+        &network,
+        service_fn(|_| async { unreachable!("state service should not be called") }),
+    )
+    .oneshot(BlockRequest {
+        transaction_hash: tx.hash(),
+        transaction: Arc::new(tx),
+        known_utxos: Arc::new(HashMap::new()),
+        height,
+        time: DateTime::<Utc>::MAX_UTC,
+    })
+    .await;
+
+    assert_eq!(
+        block_response,
+        Err(TransactionError::ShieldedOnlyTransparentOutput),
+        "block verification must reject transparent coinbase outputs on shielded-only networks",
+    );
+}
