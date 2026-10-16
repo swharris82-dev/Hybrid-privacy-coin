@@ -516,6 +516,14 @@ impl MinerParams {
             .map(|addr| Address::try_from_zcash_address(net, addr))
             .ok_or(MinerParamsError::MissingAddr)??;
 
+        // Shielded-only networks reject transparent and Sapling coinbase outputs, and route new
+        // Orchard value to Ironwood, so the miner must have an Orchard receiver.
+        if net.shielded_only_height().is_some()
+            && !matches!(&addr, Address::Unified(ua) if ua.orchard().is_some())
+        {
+            return Err(MinerParamsError::NotShieldedOnlyAddr);
+        }
+
         // Always tag the coinbase with the Zebra marker, even without configured
         // `extra_coinbase_data`, so every block Zebra builds is identifiable. The type of
         // `extra_coinbase_data` bounds its length, so the marker, separator, and data always fit in
@@ -592,6 +600,11 @@ impl From<Address> for MinerParams {
 pub enum MinerParamsError {
     #[error("Missing miner address")]
     MissingAddr,
+    #[error(
+        "this network only accepts shielded transactions, so mining.miner_address must be a \
+         unified address with an Orchard receiver"
+    )]
+    NotShieldedOnlyAddr,
     #[error("Invalid miner address: {0}")]
     InvalidAddr(zcash_address::ConversionError<&'static str>),
     #[error(transparent)]
@@ -742,7 +755,13 @@ where
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         Self {
-            miner_params: MinerParams::new(net, conf).ok(),
+            miner_params: MinerParams::new(net, conf)
+                .inspect_err(|error| {
+                    if !matches!(error, MinerParamsError::MissingAddr) {
+                        tracing::warn!(%error, "mining is disabled: invalid mining config");
+                    }
+                })
+                .ok(),
             block_verifier_router,
             sync_status,
             mined_block_sender: mined_block_sender

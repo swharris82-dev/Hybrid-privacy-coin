@@ -778,3 +778,49 @@ fn coinbase_pays_nsm_subsidy() {
     );
     assert!(cache.get(height, fee, Some(Amount::zero())).is_none());
 }
+
+/// Shielded-only networks only accept miner addresses with an Orchard receiver, since
+/// transparent and Sapling coinbase outputs would make every mined block invalid.
+#[test]
+fn shielded_only_networks_require_orchard_miner_address() {
+    use crate::config::mining::Config;
+
+    let _init_guard = zebra_test::init();
+
+    let shielded_only = testnet::Parameters::build()
+        .with_funding_streams(vec![])
+        .with_lockbox_disbursements(vec![])
+        .with_shielded_only_height(Height(1))
+        .to_network()
+        .expect("shielded-only network without transparent coinbase payments is valid");
+
+    let params = |net: &Network, address: &str| {
+        MinerParams::new(
+            net,
+            Config {
+                miner_address: Some(address.parse().expect("test address parses")),
+                ..Default::default()
+            },
+        )
+    };
+
+    // Unified address with Orchard, Sapling, and transparent receivers: accepted.
+    let unified = default_miner_address(shielded_only.kind(), &MinerAddressType::Unified);
+    assert!(params(&shielded_only, unified).is_ok());
+
+    // Unified address with only an Orchard receiver: accepted.
+    let orchard_only = "utest10zg6frxk32ma8980kdv9473e4aclw7clq9hydzcj6l349pkqzxk2mmj3cn7j5x38w6l4wyryv50whnlrw0k9agzpdf5fxyj7kq96ukcp";
+    assert!(params(&shielded_only, orchard_only).is_ok());
+
+    // Transparent and Sapling addresses: rejected.
+    for addr_type in [MinerAddressType::Transparent, MinerAddressType::Sapling] {
+        let address = default_miner_address(shielded_only.kind(), &addr_type);
+        assert!(matches!(
+            params(&shielded_only, address),
+            Err(super::MinerParamsError::NotShieldedOnlyAddr)
+        ));
+
+        // The same addresses are fine on a network without the shielded-only rules.
+        assert!(params(&Network::new_default_testnet(), address).is_ok());
+    }
+}

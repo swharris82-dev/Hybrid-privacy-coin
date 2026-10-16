@@ -8,9 +8,10 @@
 # can receive funds. Viewing keys work as they do in Zcash.
 
 [mining]
-# Coinbase rewards must go to a shielded receiver. Use a unified address
-# that contains an Orchard receiver (Zebra routes it to Ironwood at NU6.3).
-# A transparent-only address will produce blocks the network rejects.
+# Coinbase rewards must go to a shielded receiver: a unified address with an
+# Orchard receiver (Zebra routes it to Ironwood at NU6.3). Zebra refuses to
+# build block templates for any other address on this network.
+# Replace with an address from your own wallet so you hold the spending key.
 miner_address = "REPLACE_WITH_YOUR_UNIFIED_TESTNET_ADDRESS"
 # miner_memo = "hybrid testnet"
 
@@ -52,3 +53,8 @@ lockbox_disbursements = []
 
 [rpc]
 listen_addr = "127.0.0.1:18232"
+
+# A private network with no synced peers never looks "caught up", so the
+# mempool (and block templates) would stay off. Enable it from genesis.
+[mempool]
+debug_enable_at_height = 0

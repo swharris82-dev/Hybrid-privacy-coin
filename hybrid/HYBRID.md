@@ -14,6 +14,8 @@ Design spec: the "Hybrid Privacy Coin: Design Spec" doc.
 | Node config for a shielded-only network | Done, tested |
 | Startup guard against transparent coinbase payments | Done, tested |
 | Own genesis block | Done, minted and tested |
+| Mining shielded blocks | Done, blocks 1 to 4 mined on a live node |
+| Miner address guard | Done, tested |
 | RandomX proof of work | Not started |
 | Dandelion++ transaction relay | Not started |
 | Emission curve, fee burn, tail emission | Not started (reuse NU7, see below) |
@@ -71,6 +73,15 @@ Files touched:
 - `zebra-consensus/src/error.rs`: four rejection errors, each scored as peer misbehavior
 - `zebra-network/src/config.rs`: `shielded_only_height` in `zebrad.toml`
 
+**Mining.** On a live node, blocks 1 to 4 paid their full 6.25-coin rewards into the
+Ironwood shielded pool, leaving every other pool at zero. A block paying a transparent
+address was rejected with `ShieldedOnlyTransparentOutput` and never joined the chain.
+Zebra now also refuses to build templates on a shielded-only network unless
+`miner_address` is a unified address with an Orchard receiver, logging why at startup.
+
+`hybrid/mine-block.py` mines blocks while `disable_pow = true`: it fetches a template,
+fills in a zero nonce and solution, and submits the block.
+
 ## Tests
 
 Run each with `cargo nextest run`:
@@ -83,6 +94,8 @@ Run each with `cargo nextest run`:
 | zebra-consensus | `shielded_only_activation_boundary` | Height gating; off on Mainnet and public Testnet |
 | zebra-consensus | `shielded_only_classifies_historical_transactions` | Every Mainnet and Testnet vector transaction classified correctly |
 | zebra-consensus | `shielded_only_rejects_transparent_coinbase_in_blocks` | Rule fires through the block verifier |
+| zebra-chain | `custom_genesis_*` (3 tests) | Genesis builder output, hash inputs, message limits |
+| zebra-rpc | `shielded_only_networks_require_orchard_miner_address` | Miner address guard |
 
 ```bash
 cargo nextest run -p zebra-chain -p zebra-network -p zebra-consensus --lib -E 'test(/shielded_only|hybrid_testnet/)'
@@ -100,6 +113,12 @@ curl -s -H 'Content-Type: application/json' http://127.0.0.1:18232 \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"submitblock\",\"params\":[\"$(cat hybrid/genesis-block.hex)\"]}"
 ```
 
+Mine blocks (proof of work disabled):
+
+```bash
+python3 hybrid/mine-block.py --count 10
+```
+
 To mint a different genesis block (new message, time, or difficulty):
 
 ```bash
@@ -114,8 +133,9 @@ Proof of work is disabled in this config until RandomX lands.
 
 ## Next steps, in order
 
-1. **First shielded block.** Mine block 1 with a coinbase paid to an Orchard/Ironwood
-   address, confirming the shielded-only rule and the block template code agree.
+1. **Spend a shielded coin.** Mined coins need a wallet that holds the miner address's
+   spending key to move them. Set up a wallet (see step 6) and send a shielded payment
+   between two addresses on this network.
 2. **NU7 economics.** Zcash NU7 already implements a fee burn (ZIP 235) and reissuance
    of burned value (ZIP 234/237). Test activating `"NU7" = 1` and tune
    `initial_nsm_value_balance` and halving intervals. This gives the capped emission plus
@@ -138,6 +158,7 @@ Proof of work is disabled in this config until RandomX lands.
   before activation are not purged until they fail block validation. The Orchard
   soft fork handles this in `zebra-state/src/service/chain_tip.rs`; copy that if the
   chain ever activates the rule mid-life. Activating at height 1 avoids it.
-- Not run end to end: no blocks have been mined on this network yet.
+- No shielded payment has been made yet, only coinbase rewards.
+- The test blocks paid Zebra's public test address, which nobody here holds the key for.
 - Upstream Zebra's contribution rules apply to PRs to Zebra itself. This branch is a
   separate project and is not meant to be sent upstream.
