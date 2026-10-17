@@ -1,0 +1,285 @@
+From be164a9ed9d8e05857e9e658348b0033f96fc0f9 Mon Sep 17 00:00:00 2001
+From: Stephen Harris <swharris82@gmail.com>
+Date: Sat, 17 Oct 2026 17:51:07 +0000
+Subject: [PATCH] feat: add a custom-test network for private chains with
+ Testnet addresses
+
+Add `-n custom-test`, which uses Testnet address encodings with the
+activation heights from `--activation-heights`, persisted like regtest.
+This lets the wallet run against a configured Zebra Testnet such as the
+Lacuna network.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMN6sd47rYSvftBgYpdS2G
+---
+ src/commands/inspect/block.rs           | 10 +++++++-
+ src/commands/wallet/init.rs             | 21 +++++++++-------
+ src/commands/wallet/restore_mnemonic.rs | 21 +++++++++-------
+ src/config.rs                           | 13 ++++------
+ src/data.rs                             | 32 +++++++++++++++++++++++++
+ src/remote.rs                           |  2 +-
+ 6 files changed, 71 insertions(+), 28 deletions(-)
+
+diff --git a/src/commands/inspect/block.rs b/src/commands/inspect/block.rs
+index 3cb9490..93cb201 100644
+--- a/src/commands/inspect/block.rs
++++ b/src/commands/inspect/block.rs
+@@ -58,6 +58,9 @@ impl BlockParams for Network {
+             Self::Main | Self::Test => 200,
+             #[cfg(feature = "regtest_support")]
+             Self::Regtest(_) => 48,
++            // Custom test networks use Testnet-sized headers.
++            #[cfg(feature = "regtest_support")]
++            Self::CustomTest(_) => 200,
+         }
+     }
+ 
+@@ -66,6 +69,8 @@ impl BlockParams for Network {
+             Self::Main | Self::Test => 9,
+             #[cfg(feature = "regtest_support")]
+             Self::Regtest(_) => 5,
++            #[cfg(feature = "regtest_support")]
++            Self::CustomTest(_) => 9,
+         }
+     }
+ 
+@@ -80,7 +85,10 @@ impl BlockParams for Network {
+                     .unwrap(),
+             ),
+             #[cfg(feature = "regtest_support")]
+-            Self::Regtest(_) => U256::from_big_endian(
++            // Custom test networks configure their own limit; the hybrid network uses
++            // the regtest value, which is also the most permissive Zcash limit.
++            #[cfg(feature = "regtest_support")]
++            Self::Regtest(_) | Self::CustomTest(_) => U256::from_big_endian(
+                 &hex::decode("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f")
+                     .unwrap(),
+             ),
+diff --git a/src/commands/wallet/init.rs b/src/commands/wallet/init.rs
+index d8a0937..0fd23a9 100644
+--- a/src/commands/wallet/init.rs
++++ b/src/commands/wallet/init.rs
+@@ -33,13 +33,13 @@ pub(crate) struct Command {
+     #[arg(long)]
+     birthday: Option<u32>,
+ 
+-    /// The network the wallet will be used with: \"test\", \"main\", or \"regtest\"
++    /// The network the wallet will be used with: \"test\", \"main\", \"regtest\", or \"custom-test\"
+     /// (requires the `regtest_support` feature). Default is \"test\".
+     #[arg(short, long)]
+     #[arg(value_parser = Network::parse)]
+     network: Network,
+ 
+-    /// Required for `-n regtest`: a TOML file giving the validator's
++    /// Required for `-n regtest` and `-n custom-test`: a TOML file giving the validator's
+     /// activation height per network upgrade (keys: overwinter, sapling,
+     /// blossom, heartwood, canopy, nu5, nu6, nu6_1, nu6_2, nu6_3; each a
+     /// height or "never"; a missing key means the upgrade is inactive but
+@@ -60,20 +60,23 @@ impl Command {
+         // Regtest requires explicit activation heights (persisted below so
+         // later commands agree); they are rejected for main/test.
+         #[cfg(feature = "regtest_support")]
+-        let params = match opts.network {
+-            Network::Regtest(_) => {
++        let params = match opts.network.configured_heights() {
++            Some(_) => {
+                 let path = opts.activation_heights.as_ref().ok_or_else(|| {
+-                    anyhow::anyhow!("`-n regtest` requires --activation-heights <file>")
++                    anyhow::anyhow!(
++                        "`-n regtest` and `-n custom-test` require --activation-heights <file>"
++                    )
+                 })?;
+-                Network::Regtest(crate::data::load_activation_heights(path)?)
++                opts.network
++                    .with_heights(crate::data::load_activation_heights(path)?)
+             }
+-            other => {
++            None => {
+                 if opts.activation_heights.is_some() {
+                     return Err(anyhow::anyhow!(
+-                        "--activation-heights is only valid with `-n regtest`"
++                        "--activation-heights is only valid with `-n regtest` or `-n custom-test`"
+                     ));
+                 }
+-                other
++                opts.network
+             }
+         };
+         #[cfg(not(feature = "regtest_support"))]
+diff --git a/src/commands/wallet/restore_mnemonic.rs b/src/commands/wallet/restore_mnemonic.rs
+index d297692..e9a8810 100644
+--- a/src/commands/wallet/restore_mnemonic.rs
++++ b/src/commands/wallet/restore_mnemonic.rs
+@@ -25,13 +25,13 @@ pub(crate) struct Command {
+     #[arg(long)]
+     birthday: Option<u32>,
+ 
+-    /// The network the wallet will be used with: \"test\", \"main\", or \"regtest\"
++    /// The network the wallet will be used with: \"test\", \"main\", \"regtest\", or \"custom-test\"
+     /// (requires the `regtest_support` feature). Default is \"test\".
+     #[arg(short, long)]
+     #[arg(value_parser = Network::parse)]
+     network: Network,
+ 
+-    /// Required for `-n regtest`: a TOML file giving the validator's
++    /// Required for `-n regtest` and `-n custom-test`: a TOML file giving the validator's
+     /// activation height per network upgrade (keys: overwinter, sapling,
+     /// blossom, heartwood, canopy, nu5, nu6, nu6_1, nu6_2, nu6_3; each a
+     /// height or "never"; a missing key means the upgrade is inactive but
+@@ -52,20 +52,23 @@ impl Command {
+         // Regtest requires explicit activation heights (persisted below so
+         // later commands agree); they are rejected for main/test.
+         #[cfg(feature = "regtest_support")]
+-        let params = match opts.network {
+-            Network::Regtest(_) => {
++        let params = match opts.network.configured_heights() {
++            Some(_) => {
+                 let path = opts.activation_heights.as_ref().ok_or_else(|| {
+-                    anyhow::anyhow!("`-n regtest` requires --activation-heights <file>")
++                    anyhow::anyhow!(
++                        "`-n regtest` and `-n custom-test` require --activation-heights <file>"
++                    )
+                 })?;
+-                Network::Regtest(crate::data::load_activation_heights(path)?)
++                opts.network
++                    .with_heights(crate::data::load_activation_heights(path)?)
+             }
+-            other => {
++            None => {
+                 if opts.activation_heights.is_some() {
+                     return Err(anyhow::anyhow!(
+-                        "--activation-heights is only valid with `-n regtest`"
++                        "--activation-heights is only valid with `-n regtest` or `-n custom-test`"
+                     ));
+                 }
+-                other
++                opts.network
+             }
+         };
+         #[cfg(not(feature = "regtest_support"))]
+diff --git a/src/config.rs b/src/config.rs
+index 082501f..28953b0 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -104,10 +104,7 @@ fn init_wallet_config<P: AsRef<Path>>(
+         // Persisted verbatim from what the operator's file stated, so an
+         // explicit "never" and an absent key survive distinctly.
+         #[cfg(feature = "regtest_support")]
+-        activation_heights: match network {
+-            Network::Regtest(heights) => Some(heights),
+-            _ => None,
+-        },
++        activation_heights: network.configured_heights(),
+     };
+ 
+     let config_str = toml::to_string(&config)
+@@ -144,15 +141,15 @@ impl WalletConfig {
+         // For regtest, replace the parsed default heights with the ones
+         // persisted at `init` so this command agrees with the wallet's chain.
+         #[cfg(feature = "regtest_support")]
+-        let network = match network {
+-            Network::Regtest(_) => {
++        let network = match network.configured_heights() {
++            Some(_) => {
+                 let heights = config
+                     .activation_heights
+                     .ok_or(error::Error::InvalidKeysFile)?;
+                 heights.warn_on_implicitly_inactive("wallet config [activation_heights]");
+-                Network::Regtest(heights)
++                network.with_heights(heights)
+             }
+-            other => other,
++            None => network,
+         };
+ 
+         let birthday = config.birthday.map(BlockHeight::from).unwrap_or_else(|| {
+diff --git a/src/data.rs b/src/data.rs
+index ed11ec1..1d10073 100644
+--- a/src/data.rs
++++ b/src/data.rs
+@@ -32,9 +32,33 @@ pub(crate) enum Network {
+     /// but must survive the round-trip distinctly.
+     #[cfg(feature = "regtest_support")]
+     Regtest(ActivationHeights),
++    /// A custom test network: Testnet address encodings (`utest…`, `tm…`) with the
++    /// caller-chosen activation heights, for private chains such as Lacuna that run as a
++    /// configured Zebra Testnet. Heights are fixed at `init` and persisted, as for regtest.
++    #[cfg(feature = "regtest_support")]
++    CustomTest(ActivationHeights),
+ }
+ 
+ impl Network {
++    /// Returns the activation heights carried by a network whose schedule is set at `init`.
++    #[cfg(feature = "regtest_support")]
++    pub(crate) fn configured_heights(&self) -> Option<ActivationHeights> {
++        match self {
++            Network::Regtest(heights) | Network::CustomTest(heights) => Some(*heights),
++            _ => None,
++        }
++    }
++
++    /// Returns this network with `heights` in place of its schedule, if it takes one.
++    #[cfg(feature = "regtest_support")]
++    pub(crate) fn with_heights(self, heights: ActivationHeights) -> Network {
++        match self {
++            Network::Regtest(_) => Network::Regtest(heights),
++            Network::CustomTest(_) => Network::CustomTest(heights),
++            other => other,
++        }
++    }
++
+     pub(crate) fn parse(name: &str) -> Result<Network, String> {
+         match name {
+             "main" => Ok(Network::Main),
+@@ -45,6 +69,8 @@ impl Network {
+             // (e.g. address encoding) are unaffected by the heights.
+             #[cfg(feature = "regtest_support")]
+             "regtest" => Ok(Network::Regtest(DEFAULT_REGTEST)),
++            #[cfg(feature = "regtest_support")]
++            "custom-test" => Ok(Network::CustomTest(DEFAULT_REGTEST)),
+             other => Err(format!("Unsupported network: {other}")),
+         }
+     }
+@@ -55,6 +81,8 @@ impl Network {
+             Network::Main => "main",
+             #[cfg(feature = "regtest_support")]
+             Network::Regtest(_) => "regtest",
++            #[cfg(feature = "regtest_support")]
++            Network::CustomTest(_) => "custom-test",
+         }
+     }
+ 
+@@ -233,6 +261,8 @@ impl Parameters for Network {
+             Network::Main => consensus::Network::MainNetwork.network_type(),
+             #[cfg(feature = "regtest_support")]
+             Network::Regtest(heights) => heights.to_local_network().network_type(),
++            #[cfg(feature = "regtest_support")]
++            Network::CustomTest(_) => consensus::NetworkType::Test,
+         }
+     }
+ 
+@@ -242,6 +272,8 @@ impl Parameters for Network {
+             Network::Main => consensus::Network::MainNetwork.activation_height(nu),
+             #[cfg(feature = "regtest_support")]
+             Network::Regtest(heights) => heights.to_local_network().activation_height(nu),
++            #[cfg(feature = "regtest_support")]
++            Network::CustomTest(heights) => heights.to_local_network().activation_height(nu),
+         }
+     }
+ }
+diff --git a/src/remote.rs b/src/remote.rs
+index 225697b..bdbbd21 100644
+--- a/src/remote.rs
++++ b/src/remote.rs
+@@ -48,7 +48,7 @@ impl ServerOperator {
+             (ServerOperator::ZecRocks, Network::Test) => ZEC_ROCKS_TESTNET,
+             // No operator hosts regtest; users must pass a custom host:port.
+             #[cfg(feature = "regtest_support")]
+-            (_, Network::Regtest(_)) => &[],
++            (_, Network::Regtest(_) | Network::CustomTest(_)) => &[],
+         }
+     }
+ }
+-- 
+2.43.0
+

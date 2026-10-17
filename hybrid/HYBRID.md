@@ -19,7 +19,8 @@ Design spec: the "Hybrid Privacy Coin: Design Spec" doc.
 | RandomX proof of work | Not started |
 | Dandelion++ transaction relay | Not started |
 | Emission curve, fee burn, tail emission | Not started (reuse NU7, see below) |
-| Wallet and light wallet server | Not started |
+| Wallet and light wallet server | Done, private payment tested (see `wallet/WALLET.md`) |
+| Developer fee (10% for 4 years) | Not started |
 | Independent audit | Not started |
 
 ## What changed
@@ -133,9 +134,10 @@ Proof of work is disabled in this config until RandomX lands.
 
 ## Next steps, in order
 
-1. **Spend a shielded coin.** Mined coins need a wallet that holds the miner address's
-   spending key to move them. Set up a wallet (see step 6) and send a shielded payment
-   between two addresses on this network.
+1. **Developer fee.** A consensus rule that every block in the first 4 years pays 10% of
+   its reward to the developer's shielded address, checked by every node through the
+   coinbase's public decryption key (ZIP 213). The address must come from a wallet the
+   developer creates on their own device.
 2. **NU7 economics.** Zcash NU7 already implements a fee burn (ZIP 235) and reissuance
    of burned value (ZIP 234/237). Test activating `"NU7" = 1` and tune
    `initial_nsm_value_balance` and halving intervals. This gives the capped emission plus
@@ -148,8 +150,8 @@ Proof of work is disabled in this config until RandomX lands.
    to send new transactions along a random stem before broadcasting. Add Tor/I2P docs.
 5. **Address prefixes and branding.** Custom networks currently reuse Zcash Testnet
    address prefixes. Give the chain its own HRPs and coin type.
-6. **Wallet.** Fork Zallet or a librustzcash-based light wallet plus Zaino for light
-   clients. Viewing key export comes from librustzcash.
+6. **Graphical wallet.** The command-line wallet works (`wallet/WALLET.md`); a phone or
+   desktop wallet would fork Zashi or Zingo.
 7. **Audit and public testnet** before any mainnet.
 
 ## Known gaps
@@ -158,7 +160,6 @@ Proof of work is disabled in this config until RandomX lands.
   before activation are not purged until they fail block validation. The Orchard
   soft fork handles this in `zebra-state/src/service/chain_tip.rs`; copy that if the
   chain ever activates the rule mid-life. Activating at height 1 avoids it.
-- No shielded payment has been made yet, only coinbase rewards.
 - The test blocks paid Zebra's public test address, which nobody here holds the key for.
 - Upstream Zebra's contribution rules apply to PRs to Zebra itself. This branch is a
   separate project and is not meant to be sent upstream.

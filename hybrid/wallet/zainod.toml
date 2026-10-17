@@ -1,0 +1,42 @@
+# Zaino Configuration
+#
+# Generated with `zainod generate-config`
+#
+# Configuration sources are layered (highest priority first):
+#   1. Environment variables (prefix: ZAINO_)
+#   2. TOML configuration file
+#   3. Built-in defaults
+#
+# For detailed documentation, see:
+#   https://github.com/zingolabs/zaino
+
+backend = "rpc"
+zebra_db_path = "/path/to/zebra/state"
+ephemeral_finalised_state = false
+network = "Regtest"
+
+[grpc_settings]
+listen_address = "127.0.0.1:8137"
+
+[validator_settings]
+validator_grpc_listen_address = "127.0.0.1:18230"
+validator_jsonrpc_listen_address = "127.0.0.1:18232"
+validator_user = "xxxxxx"
+validator_password = "xxxxxx"
+
+[service]
+timeout = 30
+channel_size = 32
+
+[storage.cache]
+capacity = 10000
+shard_power = 4
+
+[storage.database]
+path = "/path/to/zaino/db"
+size = 384
+sync_write_batch_size = 8
+accumulator_rebuild_memory_size = 8
+sync_checkpoint_interval = 120
+
+[mempool]

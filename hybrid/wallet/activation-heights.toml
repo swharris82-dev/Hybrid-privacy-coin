@@ -1,0 +1,14 @@
+# Network upgrade heights for the hybrid (Lacuna) network, for zcash-devtool's
+# `--activation-heights` flag. Must match [network.testnet_parameters.activation_heights]
+# in hybrid-testnet.toml: activating NU6.3 at 1 activates every earlier upgrade at 1.
+overwinter = 1
+sapling = 1
+blossom = 1
+heartwood = 1
+canopy = 1
+nu5 = 1
+nu6 = 1
+nu6_1 = 1
+nu6_2 = 1
+nu6_3 = 1
+nu7 = "never"
